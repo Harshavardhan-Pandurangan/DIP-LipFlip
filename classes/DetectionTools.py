@@ -8,13 +8,13 @@ class DetectionTools:
         self.scale = 1
         self.t = 0
 
-        self.fn_haar = "/usr/local/Cellar/opencv/2.4.10.1/share/OpenCV/haarcascades/haarcascade_frontalface_alt.xml"
+        self.fn_haar = "/Users/harshavardhan/anaconda3/envs/smai/share/opencv4/haarcascades/haarcascade_frontalface_alt.xml"
         self.face_cascade = cv2.CascadeClassifier(self.fn_haar)
 
         if self.face_cascade.empty():
             print("Cannot find Haar cascade.")
 
-        self.mouth_cascade = cv2.CascadeClassifier("/usr/local/Cellar/opencv/2.4.10.1/share/OpenCV/haarcascades/haarcascade_mcs_mouth.xml")
+        self.mouth_cascade = cv2.CascadeClassifier("/Users/harshavardhan/anaconda3/envs/smai/share/opencv4/haarcascades/haarcascade_mcs_mouth.xml")
 
         if self.mouth_cascade.empty():
             print("Cannot find Haar cascade.")

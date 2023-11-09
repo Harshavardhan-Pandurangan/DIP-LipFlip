@@ -6,7 +6,7 @@ class ImageTools:
         self.minHessian = 400
         self.inlierThreshold = 15
 
-    def findGainTransform(self, src_color, dst_color, useKeypoints=True):
+    def find_gain_transform(self, src_color, dst_color, transform_matrix, use_keypoints):
         if src_color.shape[:2] != dst_color.shape[:2]:
             print("Image sizes do not match!")
             return False
@@ -17,18 +17,19 @@ class ImageTools:
             print("No data to match gain with!")
             return False
 
-        transformMatrix = np.eye(4, 4, dtype=np.float32)
+        transform_matrix = np.eye(4, dtype=np.float32)
 
-        BGR_src, BGR_dst = self.findMatchingBGR(src_color, dst_color) if useKeypoints else self.findBGRForRegion(src_color, dst_color)
+        BGR_src, BGR_dst = self.find_matching_BGR(src_color, dst_color) if use_keypoints else self.find_BGR_for_region(src_color, dst_color)
 
         BGR_src_transpose = np.transpose(BGR_src)
-        transformMatrix = np.linalg.inv(BGR_src_transpose @ BGR_src) @ (BGR_src_transpose @ BGR_dst)
-        transformMatrix = np.transpose(transformMatrix)
+        transform_matrix = np.linalg.inv(BGR_src_transpose @ BGR_src) @ (BGR_src_transpose @ BGR_dst)
+
+        transform_matrix = np.transpose(transform_matrix)
 
         print("Transform found.")
-        return True, transformMatrix
+        return True
 
-    def findMatchingBGR(self, img_1, img_2):
+    def find_matching_BGR(self, img_1, img_2):
         if img_1.shape[:2] != img_2.shape[:2]:
             print("Image sizes do not match!")
             return False
@@ -36,47 +37,55 @@ class ImageTools:
         src_gray = cv2.cvtColor(img_1, cv2.COLOR_BGR2GRAY)
         dst_gray = cv2.cvtColor(img_2, cv2.COLOR_BGR2GRAY)
 
-        detector = cv2.ORB_create()
-        keypoints_src, descriptors_src = detector.detectAndCompute(src_gray, None)
-        keypoints_dst, descriptors_dst = detector.detectAndCompute(dst_gray, None)
+        # Adjust ORB parameters for sensitivity
+        orb = cv2.ORB_create()
+        keypoints_src, descriptors_src = orb.detectAndCompute(src_gray, None)
+        keypoints_dst, descriptors_dst = orb.detectAndCompute(dst_gray, None)
 
-        matcher = cv2.BFMatcher()
-        matches = matcher.match(descriptors_src, descriptors_dst)
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(descriptors_src, descriptors_dst)
+        matches = sorted(matches, key=lambda x: x.distance)
 
-        min_dist = min(matches, key=lambda x: x.distance).distance
-        good_matches = [match for match in matches if match.distance < 3 * min_dist]
+        good_matches = [match for match in matches if match.distance < 3 * matches[0].distance]
 
         matches_src = np.float32([keypoints_src[match.queryIdx].pt for match in good_matches])
         matches_dst = np.float32([keypoints_dst[match.trainIdx].pt for match in good_matches])
 
-        _, mask = cv2.findHomography(matches_src, matches_dst, cv2.RANSAC, 5)
+        if len(matches_src) < 4:
+            print("Not enough matches found.")
+            return False
 
-        inliers_mask = mask.ravel() == 1
-        inliers_src = matches_src[inliers_mask]
-        inliers_dst = matches_dst[inliers_mask]
+        mask = cv2.findHomography(matches_src, matches_dst, cv2.RANSAC, 5)[1]
 
-        print(f"Number of inliers found: {len(inliers_src)}")
+        inliers_src = [matches_src[i] for i in range(len(mask)) if mask[i] != 0]
+        inliers_dst = [matches_dst[i] for i in range(len(mask)) if mask[i] != 0]
+
+        print("Number of inliers found:", len(inliers_src))
 
         if len(inliers_dst) < self.inlierThreshold:
             print("Not enough inliers for gain matching.")
             return False
 
-        BGRval_1 = self.constructBGRMatrix(inliers_src, img_1)
-        BGRval_2 = self.constructBGRMatrix(inliers_dst, img_2)
+        BGRval_1 = np.zeros((len(inliers_src), 4), dtype=np.float32)
+        BGRval_2 = np.zeros((len(inliers_dst), 4), dtype=np.float32)
+
+        for i in range(len(inliers_src)):
+            x, y = int(inliers_src[i][0]), int(inliers_src[i][1])
+            BGRval_1[i, 0] = img_1[y, x, 0]
+            BGRval_1[i, 1] = img_1[y, x, 1]
+            BGRval_1[i, 2] = img_1[y, x, 2]
+            BGRval_1[i, 3] = 1
+
+        for i in range(len(inliers_dst)):
+            x, y = int(inliers_dst[i][0]), int(inliers_dst[i][1])
+            BGRval_2[i, 0] = img_2[y, x, 0]
+            BGRval_2[i, 1] = img_2[y, x, 1]
+            BGRval_2[i, 2] = img_2[y, x, 2]
+            BGRval_2[i, 3] = 1
 
         return BGRval_1, BGRval_2
 
-    def constructBGRMatrix(self, points, image):
-        BGRval = np.zeros((len(points), 4), dtype=np.float32)
-        for i, point in enumerate(points):
-            x, y = int(point[0]), int(point[1])
-            BGRval[i, 0] = image[y, x, 0]
-            BGRval[i, 1] = image[y, x, 1]
-            BGRval[i, 2] = image[y, x, 2]
-            BGRval[i, 3] = 1
-        return BGRval
-
-    def findBGRForRegion(self, img_1, img_2):
+    def find_BGR_for_region(self, img_1, img_2):
         if img_1.shape[:2] != img_2.shape[:2]:
             print("Image sizes do not match!")
             return False
@@ -84,27 +93,29 @@ class ImageTools:
         channels1 = cv2.split(img_1)
         channels2 = cv2.split(img_2)
 
-        BGRval_1 = np.hstack([channel.reshape(-1, 1) for channel in channels1] + [np.ones((img_1.shape[0] * img_1.shape[1], 1), dtype=np.float32)])
-        BGRval_2 = np.hstack([channel.reshape(-1, 1) for channel in channels2] + [np.ones((img_2.shape[0] * img_2.shape[1], 1), dtype=np.float32)])
+        BGRval_1 = np.empty((3, img_1.size), dtype=np.float32)
+        BGRval_2 = np.empty((3, img_2.size), dtype=np.float32)
 
-        BGRval_1 = np.transpose(BGRval_1)
-        BGRval_2 = np.transpose(BGRval_2)
+        for c in range(3):
+            BGRval_1[c] = channels1[c].reshape(1, -1)
+            BGRval_2[c] = channels2[c].reshape(1, -1)
 
-        BGRval_1 = BGRval_1.astype(np.float32)
-        BGRval_2 = BGRval_2.astype(np.float32)
+        ones_matrix = np.ones((1, img_1.size), dtype=np.float32)
+        BGRval_1 = np.vstack((BGRval_1, ones_matrix))
+        BGRval_2 = np.vstack((BGRval_2, ones_matrix))
+
+        BGRval_1 = BGRval_1.transpose()
+        BGRval_2 = BGRval_2.transpose()
 
         return BGRval_1, BGRval_2
 
-    def applyGainTransform(self, src, transformMatrix):
+    def apply_gain_transform(self, src, dst, transform_matrix):
         if src is None:
             print("No image to apply gain transform to!")
-            return None
+            return
 
-        # Check if the transformation matrix is 4x4 (3D perspective transformation)
-        if transformMatrix is not None and transformMatrix.shape == (4, 4):
-            dst = cv2.perspectiveTransform(src, transformMatrix)
-            dst = cv2.cvtColor(dst, cv2.COLOR_BGRA2BGR)
-            return dst
-        else:
-            print("Invalid 3D perspective transformation matrix. Expected shape (4, 4).")
-            return None
+        print("Transform matrix:")
+        print(transform_matrix)
+
+        dst = cv2.warpPerspective(src, transform_matrix, src.shape[:2][::-1])
+        dst = cv2.cvtColor(dst, cv2.COLOR_BGRA2BGR)

@@ -162,3 +162,4 @@ cython_debug/
 .vscode/launch.json
 .gitignore
 .vscode/settings.json
+classes/.DS_Store
