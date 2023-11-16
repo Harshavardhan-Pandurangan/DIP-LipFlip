@@ -1,0 +1,3 @@
+/Users/harshavardhan/Documents/DIP/LipFlip/src/CMakeFiles/lip_flip.dir
+/Users/harshavardhan/Documents/DIP/LipFlip/src/CMakeFiles/edit_cache.dir
+/Users/harshavardhan/Documents/DIP/LipFlip/src/CMakeFiles/rebuild_cache.dir
